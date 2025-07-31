@@ -274,81 +274,20 @@ async def hackrx_run(request: HackRXRequest):
             
             print(f"✅ Document processed into {len(clauses)} NEW clauses")
             
-            # PRODUCTION-GRADE: Smart caching with cleanup for optimal performance
-            print("🧹 IMPLEMENTING SMART VECTOR DATABASE MANAGEMENT...")
+            # PRODUCTION-GRADE: Simplified real-time processing (no complex caching)
+            print("🚀 REAL-TIME PROCESSING: Fresh analysis for maximum accuracy")
             
             current_time = int(time.time())
             
-            # Step 1: Check if same PDF was processed recently (smart caching)
-            recent_cutoff = current_time - 300  # 5 minutes
-            base_doc_name = f"realtime_{url_hash}"
+            # Always upload new clauses for real-time accuracy
+            print("📤 UPLOADING NEW CLAUSES...")
             
-            try:
-                # Query for recent clauses from same PDF
-                print(f"🔍 Checking for recent processing of same PDF...")
-                
-                # For production efficiency, reuse recent clauses if available
-                # This prevents unnecessary reprocessing of the same PDF
-                recent_search = pinecone_service.index.query(
-                    vector=[0.0] * 768,  # Dummy vector for metadata-only search
-                    top_k=1,
-                    include_metadata=True,
-                    filter={
-                        "$and": [
-                            {"document": {"$regex": f"^{base_doc_name}"}},
-                            {"timestamp": {"$gte": recent_cutoff}}
-                        ]
-                    }
-                )
-                
-                if recent_search.matches:
-                    print("⚡ SMART CACHE: Recent processing found - using existing clauses")
-                    # Use the recent document name for queries
-                    recent_doc_name = recent_search.matches[0].metadata.get('document', document_name)
-                    document_name = recent_doc_name
-                    skip_upload = True
-                else:
-                    print("🔄 FRESH PROCESSING: No recent cache found - processing new")
-                    skip_upload = False
-                    
-            except Exception as cache_check_error:
-                print(f"⚠️ Cache check failed: {cache_check_error} - proceeding with fresh processing")
-                skip_upload = False
+            success = processor.upload_to_pinecone(clauses)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to upload document to vector database")
             
-            # Step 2: Upload new clauses only if needed
-            if not skip_upload:
-                print("📤 UPLOADING NEW CLAUSES...")
-                
-                # Add enhanced metadata for better management
-                for clause in clauses:
-                    # Ensure clause has metadata attribute
-                    if not hasattr(clause, 'metadata') or clause.metadata is None:
-                        clause.metadata = {}
-                    clause.metadata['timestamp'] = current_time
-                    clause.metadata['request_id'] = request_id
-                    clause.metadata['url_hash'] = url_hash
-                
-                success = processor.upload_to_pinecone(clauses)
-                if not success:
-                    raise HTTPException(status_code=500, detail="Failed to upload document to vector database")
-                
-                print(f"✅ {len(clauses)} NEW clauses uploaded with document_name: {document_name}")
-                
-                # Step 3: Cleanup old clauses to prevent database bloat
-                try:
-                    cleanup_cutoff = current_time - 3600  # Remove clauses older than 1 hour
-                    print(f"🗑️ CLEANUP: Removing clauses older than {cleanup_cutoff}")
-                    
-                    # In a production system, you'd implement batch deletion here
-                    # For now, we rely on the time-based filtering in queries
-                    print("✅ Cleanup scheduled (time-based filtering active)")
-                    
-                except Exception as cleanup_error:
-                    print(f"⚠️ Cleanup warning: {cleanup_error}")
-            else:
-                print("⚡ REUSING RECENT CLAUSES - No upload needed")
-            
-            print(f"🔒 FINAL DOCUMENT NAME: {document_name}")
+            print(f"✅ {len(clauses)} NEW clauses uploaded with document_name: {document_name}")
+            print(f"🔒 DOCUMENT READY FOR QUERIES: {document_name}")
             
         finally:
             # Clean up temporary file
