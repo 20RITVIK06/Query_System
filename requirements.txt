@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+pinecone
+google-generativeai
+psycopg2-binary
+redis
+python-multipart
+python-dotenv
+PyPDF2
+pdfplumber
