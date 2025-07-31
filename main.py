@@ -46,8 +46,8 @@ async def generate_hackrx_answer(question: str, clauses: List[Clause]) -> str:
         for i, clause in enumerate(relevant_clauses)
     ])
     
-    # HACKATHON-OPTIMIZED prompt for maximum scoring
-    prompt = f"""You are an expert insurance analyst. Answer this question using ONLY the policy information provided.
+    # HACKATHON-OPTIMIZED prompt for maximum scoring with structured format
+    prompt = f"""You are an expert insurance policy analyst. Answer this question using ONLY the policy information provided.
 
 POLICY INFORMATION:
 {clauses_context}
@@ -55,21 +55,23 @@ POLICY INFORMATION:
 QUESTION: {question}
 
 CRITICAL INSTRUCTIONS:
-- Give precise, factual answers from the policy text ONLY
-- Include specific numbers, percentages, amounts, timeframes
-- If information exists but is partial, provide what's available
+- Provide a comprehensive, detailed answer based ONLY on the policy text
+- Include ALL relevant details: numbers, percentages, amounts, timeframes, conditions
+- Structure the answer as a complete, flowing paragraph
+- Include specific policy references and conditions when available
+- If multiple aspects exist, cover all of them thoroughly
 - Only say "Not specified in policy" if truly no relevant information exists
-- Be comprehensive but concise
+- Be thorough and professional like an insurance expert
 
-ANSWER:"""
+DETAILED ANSWER:"""
 
     try:
-        # HACKATHON-OPTIMIZED generation parameters for maximum scoring
+        # HACKATHON-OPTIMIZED generation parameters for comprehensive answers
         generation_config = {
             'temperature': 0.02,  # Ultra-low for maximum consistency
             'top_p': 0.95,
             'top_k': 5,
-            'max_output_tokens': 200,  # Increased for comprehensive answers
+            'max_output_tokens': 400,  # Increased for detailed comprehensive answers
         }
         
         response = gemini_service.model.generate_content(
