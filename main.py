@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 import json
-import requests
+import httpx
 import tempfile
 import os
 from typing import List, Dict, Any
@@ -240,59 +240,67 @@ async def hackrx_run(request: HackRXRequest):
         if not pinecone_service or not pinecone_service.index:
             raise HTTPException(status_code=503, detail="Pinecone service not available")
         
-        # PRODUCTION: Generate unique document identifier for each request
-        import hashlib
-        import time
-        import uuid
-        
-        # Create truly unique document name for each request
-        request_id = str(uuid.uuid4())[:8]
-        timestamp = str(int(time.time()))
-        url_hash = hashlib.md5(request.documents.encode()).hexdigest()[:8]
-        document_name = f"realtime_{url_hash}_{timestamp}_{request_id}"
-        
-        print(f"� PRLOCESSING DOCUMENT: {document_name}")
-        print(f"🔗 PDF URL: {request.documents}")
-        
-        # CRITICAL: Always download and process PDF fresh - NO CACHE LOOKUP
-        print("⚡ DOWNLOADING PDF...")
-        pdf_response = requests.get(request.documents, timeout=30)
-        pdf_response.raise_for_status()
-        
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            temp_file.write(pdf_response.content)
-            temp_file_path = temp_file.name
-        
-        try:
-            print("🔄 EXTRACTING TEXT AND CREATING CLAUSES...")
-            processor = DocumentProcessor()
+        # SMART-CACHE: reuse vectors & clauses if this PDF has been processed before
+        import hashlib, time, uuid
+
+        document_name: str | None = None
+        clauses: List[Clause] | None = None
+
+        if redis_service and redis_service.is_document_cached(request.documents):
+            info = redis_service.get_cached_document_info(request.documents)
+            cached = redis_service.get_cached_clauses(request.documents)
+            if info and cached:
+                document_name = info.get("document_name")
+                def _cached_to_clause(c: dict) -> Clause:
+                    return Clause(
+                        clause_id=c.get('clause_id') or c.get('id'),
+                        content=c.get('content', ''),
+                        score=c.get('score', 1.0)
+                    )
+                clauses = [_cached_to_clause(c) for c in cached]
+                print(f"✅ Using cached document {document_name} with {len(clauses)} clauses")
+                # Ensure embeddings exist in Pinecone
+                if not redis_service.are_embeddings_uploaded(request.documents):
+                    print("📤 Uploading cached clauses to Pinecone (first time)…")
+                    DocumentProcessor().upload_to_pinecone(clauses)
+                    redis_service.mark_embeddings_uploaded(request.documents)
+
+        if clauses is None:
+            # First-time processing path
+            url_hash = hashlib.md5(request.documents.encode()).hexdigest()[:8]
+            document_name = f"doc_{url_hash}"
+            print(f"🆕 Processing new document {document_name}")
+            print(f"🔗 PDF URL: {request.documents}")
+            print("⚡ DOWNLOADING PDF…")
+            async with httpx.AsyncClient(timeout=30) as client:
+                pdf_response = await client.get(request.documents)
+            pdf_response.raise_for_status()
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                temp_file.write(pdf_response.content)
+                temp_file_path = temp_file.name
+
+            try:
+                processor = DocumentProcessor()
+                text = processor.extract_text_from_file(temp_file_path)
+                clauses = processor.split_document_into_clauses(text, document_name)
+                print(f"✅ Extracted {len(clauses)} clauses from new document")
+
+                processor.upload_to_pinecone(clauses)
+
+                if redis_service:
+                    redis_service.cache_document(request.documents, document_name,
+                                                 [c.dict() for c in clauses],
+                                                 file_size=len(pdf_response.content))
+                    redis_service.mark_embeddings_uploaded(request.documents)
+            finally:
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+
+        # At this point, clauses for this PDF are guaranteed to be embedded and searchable in Pinecone.
+        # Proceed to answer the user’s questions.
             
-            # Extract text and create clauses
-            text = processor.extract_text_from_file(temp_file_path)
-            clauses = processor.split_document_into_clauses(text, document_name)
-            
-            print(f"✅ Document processed into {len(clauses)} NEW clauses")
-            
-            # PRODUCTION-GRADE: Simplified real-time processing (no complex caching)
-            print("🚀 REAL-TIME PROCESSING: Fresh analysis for maximum accuracy")
-            
-            current_time = int(time.time())
-            
-            # Always upload new clauses for real-time accuracy
-            print("📤 UPLOADING NEW CLAUSES...")
-            
-            success = processor.upload_to_pinecone(clauses)
-            if not success:
-                raise HTTPException(status_code=500, detail="Failed to upload document to vector database")
-            
-            print(f"✅ {len(clauses)} NEW clauses uploaded with document_name: {document_name}")
-            print(f"🔒 DOCUMENT READY FOR QUERIES: {document_name}")
-            
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+
 
         
         # Process questions in parallel for maximum speed
@@ -473,7 +481,7 @@ async def hackrx_run(request: HackRXRequest):
         
         return HackRXResponse(answers=answers)
                 
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         raise HTTPException(status_code=400, detail=f"Failed to download document: {str(e)}")
     except Exception as e:
         print(f"❌ HackRX processing failed: {e}")
