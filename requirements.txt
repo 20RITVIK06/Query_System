@@ -9,3 +9,4 @@ python-multipart
 python-dotenv
 PyPDF2
 pdfplumber
+httpx
