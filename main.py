@@ -290,7 +290,7 @@ async def hackrx_run(request: HackRXRequest):
 
                 if redis_service:
                     redis_service.cache_document(request.documents, document_name,
-                                                 [c.dict() for c in clauses],
+                                                 [(c.model_dump() if hasattr(c, 'model_dump') else c) for c in clauses],
                                                  file_size=len(pdf_response.content))
                     redis_service.mark_embeddings_uploaded(request.documents)
             finally:
